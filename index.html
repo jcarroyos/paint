@@ -1,38 +1,338 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.10/lib/p5.min.js"></script>
+    <title>Musical Paintbrush</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: 'Arial', sans-serif;
+            color: white;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .subtitle {
+            font-size: 1.1rem;
+            margin-bottom: 30px;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        button:hover {
+            background: rgba(255,255,255,0.3);
+            border-color: rgba(255,255,255,0.5);
+            transform: translateY(-2px);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        .canvas-container {
+            margin: 20px auto;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .info {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+            line-height: 1.6;
+        }
+        
+        .legend {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+    </style>
 </head>
 <body>
-    <h1>Mi propio Paintbrush</h1>
+    <div class="container">
+        <h1>🎵 Musical Paintbrush</h1>
+        <p class="subtitle">Dibuja música con tus trazos - Cada línea es una melodía</p>
+        
+        <div class="controls">
+            <button id="playBtn">▶️ Reproducir</button>
+            <button id="pauseBtn">⏸️ Pausar</button>
+            <button id="clearBtn">🗑️ Limpiar</button>
+            <button id="startAudioBtn">🔊 Activar Audio</button>
+        </div>
+        
+        <div class="legend">
+            <span>⬅️ Pasado</span>
+            <span>🎵 Eje Y: Frecuencia (Grave ⬇️ | Agudo ⬆️)</span>
+            <span>Futuro ➡️</span>
+        </div>
+        
+        <div class="canvas-container" id="canvasContainer">
+            <!-- El canvas de p5.js se insertará aquí -->
+        </div>
+        
+        <div class="info">
+            <p><strong>Instrucciones:</strong></p>
+            <p>• Haz clic y arrastra para dibujar notas musicales</p>
+            <p>• El eje horizontal representa el tiempo, el vertical la altura del sonido</p>
+            <p>• Presiona "Reproducir" para escuchar tu composición</p>
+            <p>• Las notas más altas suenan más agudas, las más bajas más graves</p>
+        </div>
+    </div>
 
     <script>
-        let nombreMaria = "Maria";
-        let nombreJuan = "Juan";
-        let edadMaria = 20;
-        let edadJuan = 25;
-        let edadTotal = 0;
-        let esMayorDeEdad;
-        let nombrePedro = null;
-        console.log(edadTotal);
-        console.log(nombreMaria + " tiene " + edadMaria + " años.");
-        calcularEdad = () => {
-            //edad += 1;
-            if (edadMaria >= 18) {
-                esMayorDeEdad = true;
-            } else {
-                esMayorDeEdad = false;
-            }
-            edadTotal = edadJuan + edadMaria;
+        let canvas;
+        let synth;
+        let isPlaying = false;
+        let playbackPosition = 0;
+        let strokes = [];
+        let currentStroke = [];
+        let isDrawing = false;
+        let audioStarted = false;
+        
+        // Configuración del canvas
+        const canvasWidth = 800;
+        const canvasHeight = 400;
+        
+        // Rango de frecuencias (de C2 a C7)
+        const minFreq = 65.4; // C2
+        const maxFreq = 2093; // C7
+        
+        function setup() {
+            canvas = createCanvas(canvasWidth, canvasHeight);
+            canvas.parent('canvasContainer');
+            
+            // Configurar Tone.js
+            // NOTA SOBRE POLIFONÍA:
+            // La polifonía es la capacidad de reproducir múltiples notas simultáneamente.
+            // Si aparece "Warning: Max polyphony exceeded" significa que se están creando
+            // demasiadas notas al mismo tiempo (por dibujo rápido + release largo).
+            // Solucionamos esto aumentando maxPolyphony, reduciendo release time y
+            // limitando la frecuencia de generación de notas.
+            synth = new Tone.PolySynth({
+                maxPolyphony: 128, // Aumentamos a 128 voces simultáneas
+                voice: Tone.Synth
+            }).toDestination();
+            
+            synth.set({
+                oscillator: {
+                    type: "sine"
+                },
+                envelope: {
+                    attack: 0.05,  // Más rápido
+                    decay: 0.1,    // Más rápido  
+                    sustain: 0.2,  // Menor sustain
+                    release: 0.2,  // Muy corto para evitar solapamientos
+                }
+            });
+            
+            background(20, 25, 40);
+            drawGrid();
+            
+            // Event listeners para botones
+            document.getElementById('playBtn').addEventListener('click', startPlayback);
+            document.getElementById('pauseBtn').addEventListener('click', pausePlayback);
+            document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+            document.getElementById('startAudioBtn').addEventListener('click', startAudio);
         }
-        calcularEdad();
-        console.log(edadTotal);
-        console.log(esMayorDeEdad);
-        console.log(nombrePedro);
+        
+        function draw() {
+            background(20, 25, 40);
+            drawGrid();
+            drawStrokes();
+            
+            if (isPlaying) {
+                drawPlaybackLine();
+                playNotesAtPosition(playbackPosition);
+                playbackPosition += 2; // Velocidad de reproducción
+                
+                if (playbackPosition > width) {
+                    isPlaying = false;
+                    playbackPosition = 0;
+                }
+            }
+        }
+        
+        function drawGrid() {
+            stroke(255, 255, 255, 30);
+            strokeWeight(1);
+            
+            // Líneas verticales (tiempo)
+            for (let x = 0; x < width; x += 50) {
+                line(x, 0, x, height);
+            }
+            
+            // Líneas horizontales (frecuencia)
+            for (let y = 0; y < height; y += 30) {
+                line(0, y, width, y);
+            }
+            
+            // Línea central más visible
+            stroke(255, 255, 255, 80);
+            line(0, height/2, width, height/2);
+        }
+        
+        function drawStrokes() {
+            strokeWeight(3);
+            
+            // Dibujar trazos completados
+            for (let strokePath of strokes) {
+                if (strokePath.length > 1) {
+                    for (let i = 1; i < strokePath.length; i++) {
+                        let hue = map(strokePath[i].y, 0, height, 240, 0); // Azul a rojo
+                        stroke(hue, 100, 255, 180);
+                        line(strokePath[i-1].x, strokePath[i-1].y, strokePath[i].x, strokePath[i].y);
+                    }
+                }
+            }
+            
+            // Dibujar trazo actual
+            if (currentStroke.length > 1) {
+                for (let i = 1; i < currentStroke.length; i++) {
+                    let hue = map(currentStroke[i].y, 0, height, 240, 0);
+                    stroke(hue, 100, 255, 220);
+                    line(currentStroke[i-1].x, currentStroke[i-1].y, currentStroke[i].x, currentStroke[i].y);
+                }
+            }
+        }
+        
+        function drawPlaybackLine() {
+            stroke(255, 255, 100, 200);
+            strokeWeight(2);
+            line(playbackPosition, 0, playbackPosition, height);
+        }
+        
+        function mousePressed() {
+            if (mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+                isDrawing = true;
+                currentStroke = [{x: mouseX, y: mouseY}];
+                
+                // Reproducir nota inmediatamente
+                if (audioStarted) {
+                    let freq = mapYToFrequency(mouseY);
+                    synth.triggerAttackRelease(freq, "8n");
+                }
+            }
+        }
+        
+        function mouseDragged() {
+            if (isDrawing && mouseX >= 0 && mouseX <= width && mouseY >= 0 && mouseY <= height) {
+                currentStroke.push({x: mouseX, y: mouseY});
+                
+                // Reproducir nota mientras se arrastra (reducida frecuencia para evitar saturación)
+                if (audioStarted && frameCount % 10 === 0) { // Cambiado de 5 a 10 frames
+                    let freq = mapYToFrequency(mouseY);
+                    synth.triggerAttackRelease(freq, "32n"); // Duración más corta
+                }
+            }
+        }
+        
+        function mouseReleased() {
+            if (isDrawing && currentStroke.length > 0) {
+                strokes.push([...currentStroke]);
+                currentStroke = [];
+                isDrawing = false;
+            }
+        }
+        
+        function mapYToFrequency(y) {
+            // Invertir Y para que arriba sea agudo y abajo grave
+            let normalizedY = map(y, height, 0, 0, 1);
+            return minFreq * Math.pow(maxFreq / minFreq, normalizedY);
+        }
+        
+        function playNotesAtPosition(x) {
+            if (!audioStarted) return;
+            
+            for (let strokePath of strokes) {
+                for (let point of strokePath) {
+                    if (Math.abs(point.x - x) < 3) { // Tolerancia de 3 píxeles
+                        let freq = mapYToFrequency(point.y);
+                        synth.triggerAttackRelease(freq, "32n"); // Duración más corta para playback
+                    }
+                }
+            }
+        }
+        
+        async function startAudio() {
+            if (Tone.context.state !== 'running') {
+                await Tone.start();
+                audioStarted = true;
+                document.getElementById('startAudioBtn').style.opacity = '0.5';
+                document.getElementById('startAudioBtn').innerHTML = '🔊 Audio Activado';
+            }
+        }
+        
+        function startPlayback() {
+            if (!isPlaying) {
+                isPlaying = true;
+                playbackPosition = 0;
+            }
+        }
+        
+        function pausePlayback() {
+            isPlaying = false;
+        }
+        
+        function clearCanvas() {
+            strokes = [];
+            currentStroke = [];
+            isDrawing = false;
+            isPlaying = false;
+            playbackPosition = 0;
+            background(20, 25, 40);
+        }
+        
+        // Prevenir comportamiento por defecto del navegador
+        function touchStarted() {
+            return false;
+        }
+        
+        function touchMoved() {
+            return false;
+        }
     </script>
-
 </body>
 </html>
